@@ -1,0 +1,260 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+
+}
+
+
+// --------------------------------------------------------
+// 1. Enums (Padronização)
+// --------------------------------------------------------
+
+enum NodeType {
+  ENTERPRISE
+  SITE
+  AREA
+  LINE
+  WORKCELL
+}
+
+enum DriverProtocol {
+  S7_COMM      // Siemens
+  ETHERNET_IP  // Rockwell
+  MODBUS_TCP   // Genérico
+  OPC_UA       // Padrão
+  MQTT         // IIoT / Sparkplug
+  HTTP_REST    // Push API
+}
+
+enum AlarmSeverity {
+  CRITICAL  // Vermelho: Parada/Segurança
+  HIGH      // Laranja: Ação Imediata
+  MEDIUM    // Azul: Atenção
+  LOW       // Verde: Informativo
+  EXTERNAL  // Vindo do PLC/OPC (A definir)
+}
+
+enum AlarmStatus {
+  ACTIVE
+  ACKNOWLEDGED
+  CLEARED
+}
+
+enum UserRole {
+  ADMIN
+  ENGINEER
+  OPERATOR
+  VIEWER
+}
+
+// --------------------------------------------------------
+// 2. Domínio ISA-95 (Unified Namespace)
+// --------------------------------------------------------
+
+model FactoryNode {
+  id          Int      @id @default(autoincrement())
+  parentId    Int?     @map("parent_id")
+  name        String   @db.VarChar(100)
+  description String?
+  type        NodeType
+  
+  // Relação Recursiva (Árvore)
+  parent   FactoryNode?  @relation("NodeHierarchy", fields: [parentId], references: [id])
+  children FactoryNode[] @relation("NodeHierarchy")
+  
+  // Equipamentos vinculados a este nó (Geralmente em WORKCELL ou LINE)
+  equipments Equipment[]
+
+  @@map("factory_nodes")
+}
+
+model Equipment {
+  id          Int      @id @default(autoincrement())
+  nodeId      Int      @map("node_id") // Link com a hierarquia ISA-95
+  name        String   @db.VarChar(100)
+  description String?
+  imageUrl    String?  @map("image_url")
+  isActive    Boolean  @default(true) @map("is_active")
+
+  node       FactoryNode @relation(fields: [nodeId], references: [id])
+  tags       Tag[]
+  alarmRules AlarmRule[]
+  
+  // Histórico de Alarmes é vinculado ao equipamento para facilitar queries no Dashboard
+  alarmHistory AlarmHistory[]
+
+  @@map("equipments")
+}
+
+// --------------------------------------------------------
+// 3. Domínio de Conectividade (Drivers & Tags)
+// --------------------------------------------------------
+
+model DataSource {
+  id               Int            @id @default(autoincrement())
+  name             String         @unique @db.VarChar(100)
+  protocol         DriverProtocol
+  connectionParams String         @map("connection_params") // JSON String (IP, Port, Rack, Slot)
+  scanRateMs       Int            @default(1000) @map("scan_rate_ms")
+  enabled          Boolean        @default(true)
+  createdAt        DateTime       @default(now()) @map("created_at")
+
+  mappings TagMapping[]
+
+  @@map("data_sources")
+}
+
+model Tag {
+  id          Int     @id @default(autoincrement())
+  equipmentId Int     @map("equipment_id")
+  name        String  @db.VarChar(100)
+  unit        String? @db.VarChar(20)
+  dataType    String  @default("float") @map("data_type") // float, bool, int, string
+  
+  // Unified Namespace Path (Gerado Automaticamente: Enterprise/Site/Area/Line/Cell/TagName)
+  unsPath     String  @unique @map("uns_path") @db.VarChar(255)
+
+  equipment Equipment   @relation(fields: [equipmentId], references: [id])
+  mapping   TagMapping? // Relação 1:1 (Uma tag vem de um lugar)
+  
+  // Dados de Série Temporal (Hypertables)
+  telemetry RawTelemetry[]
+  analysis  AnalyzedData[]
+  anomalies AnomalyDetection[]
+
+  @@map("tags")
+}
+
+model TagMapping {
+  id           Int    @id @default(autoincrement())
+  tagId        Int    @unique @map("tag_id")
+  dataSourceId Int    @map("data_source_id")
+  address      String @db.VarChar(255) // DB10.DBD4, Program:Main.Tag, NodeId=...
+
+  // Scaling (Transformação Linear: y = mx + b)
+  scaleEnable Boolean @default(false) @map("scale_enable")
+  rawMin      Float?  @map("raw_min")
+  rawMax      Float?  @map("raw_max")
+  engMin      Float?  @map("eng_min")
+  engMax      Float?  @map("eng_max")
+
+  tag        Tag        @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  dataSource DataSource @relation(fields: [dataSourceId], references: [id])
+
+  @@map("tag_mappings")
+}
+
+// --------------------------------------------------------
+// 4. Domínio de Séries Temporais (TimescaleDB Hypertables)
+// --------------------------------------------------------
+// Nota: O Prisma vê isso como tabelas normais.
+// O TimescaleDB assume o controle após rodarmos o script SQL.
+
+model RawTelemetry {
+  time    DateTime @default(now())
+  tagId   Int      @map("tag_id")
+  value   Float
+  quality Int      @default(192) // OPC Quality (192 = Good)
+
+  tag Tag @relation(fields: [tagId], references: [id])
+
+  @@id([time, tagId]) // Chave composta obrigatória para Hypertables
+  @@map("raw_telemetry")
+}
+
+model AnalyzedData {
+  time       DateTime @default(now())
+  tagId      Int      @map("tag_id")
+  value      Float    // Valor agregado (ex: Média da hora)
+  metricType String   @map("metric_type") @db.VarChar(20) // 'AVG_1H', 'MIN_1H', 'MAX_1H'
+
+  tag Tag @relation(fields: [tagId], references: [id])
+
+  @@id([time, tagId, metricType])
+  @@map("analyzed_data")
+}
+
+model AnomalyDetection {
+  time  DateTime @default(now())
+  tagId Int      @map("tag_id")
+  score Float    // -1.0 a 1.0 (Scikit-Learn Isolation Forest Score)
+  value Float    // O valor lido no momento da anomalia
+
+  tag Tag @relation(fields: [tagId], references: [id])
+
+  @@id([time, tagId])
+  @@map("ai_anomalies")
+}
+
+// --------------------------------------------------------
+// 5. Domínio de Alarmes e Eventos
+// --------------------------------------------------------
+
+model AlarmRule {
+  id          Int           @id @default(autoincrement())
+  equipmentId Int           @map("equipment_id")
+  name        String        @db.VarChar(100)
+  description String?
+  severity    AlarmSeverity
+  enabled     Boolean       @default(true)
+  
+  // A Lógica Complexa (Processada pelo Python)
+  // Ex: "{tag:12} > 90 AND {tag:14} == 0"
+  condition   String        @db.VarChar(500) 
+
+  equipment Equipment      @relation(fields: [equipmentId], references: [id])
+  history   AlarmHistory[]
+
+  @@map("alarm_rules")
+}
+
+model AlarmHistory {
+  time        DateTime      @default(now())
+  equipmentId Int           @map("equipment_id")
+  ruleId      Int?          @map("rule_id") // Null se vier externo (OPC/PLC direto)
+  
+  message     String        @db.VarChar(255)
+  severity    AlarmSeverity
+  source      String        @db.VarChar(50) // "INTERNAL_RULE", "OPC_UA", "PLC_BIT"
+  
+  status      AlarmStatus
+  ackBy       String?       @map("ack_by") // Nome do usuário
+  ackTime     DateTime?     @map("ack_time")
+  
+  // Snapshot dos valores no momento do disparo (JSON String)
+  // Ex: "{"temperatura": 95.5, "pressao": 10}"
+  snapshot    String?       @db.Text 
+
+  equipment Equipment  @relation(fields: [equipmentId], references: [id])
+  rule      AlarmRule? @relation(fields: [ruleId], references: [id])
+
+  @@id([time, equipmentId, message]) // Chave composta para performance
+  @@map("alarm_history")
+}
+
+// --------------------------------------------------------
+// 6. Gestão de Acesso
+// --------------------------------------------------------
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  password  String   // Hash
+  role      UserRole @default(VIEWER)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("users")
+}
