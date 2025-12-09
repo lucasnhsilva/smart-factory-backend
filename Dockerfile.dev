@@ -1,0 +1,9 @@
+FROM node:22-alpine
+WORKDIR /usr/src/app
+# Instala openssl para o Prisma funcionar no Alpine
+RUN apk add --no-cache openssl
+COPY package*.json ./
+COPY prisma ./prisma/
+RUN npm install
+# Não rodamos o build aqui, rodamos o dev server
+CMD ["npm", "run", "start:dev"]

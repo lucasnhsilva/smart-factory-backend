@@ -1,0 +1,22 @@
+version: "3.8"
+
+services:
+  smii_backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: smii_backend
+    environment:
+      - DATABASE_URL=postgresql://postgres:smartfactory@smii_db:9432/smartfactory?schema=public
+    ports:
+      - "3000:3000"
+    networks:
+      - smii_net
+    volumes:
+      - ./src:/usr/src/app/src # Hot reload do NestJS
+      # Importante: Não sobrescrever o node_modules do container
+      - /usr/src/app/node_modules
+
+networks:
+  smii_net:
+    external: true

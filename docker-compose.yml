@@ -1,0 +1,16 @@
+services:
+  smii_backend:
+    build: .
+    container_name: smii_backend
+    restart: always
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+    networks:
+      - smii_net
+      - dokploy-network
+
+networks:
+  smii_net:
+    external: true
+  dokploy-network:
+    external: true
