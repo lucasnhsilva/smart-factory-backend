@@ -5,16 +5,15 @@
 // Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider      = "prisma-client"
+  output        = "../src/generated/prisma"
+  moduleFormat  = "cjs"
   binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
   provider = "postgresql"
-
 }
-
 
 // --------------------------------------------------------
 // 1. Enums (Padronização)
@@ -29,21 +28,21 @@ enum NodeType {
 }
 
 enum DriverProtocol {
-  S7_COMM      // Siemens
-  ETHERNET_IP  // Rockwell
-  MODBUS_TCP   // Genérico
-  OPC_UA       // Padrão
-  MQTT         // IIoT / Sparkplug
-  HTTP_REST    // Push API
-  PROFINET     // Siemens Profinet
+  S7_COMM // Siemens
+  ETHERNET_IP // Rockwell
+  MODBUS_TCP // Genérico
+  OPC_UA // Padrão
+  MQTT // IIoT / Sparkplug
+  HTTP_REST // Push API
+  PROFINET // Siemens Profinet
 }
 
 enum AlarmSeverity {
-  CRITICAL  // Vermelho: Parada/Segurança
-  HIGH      // Laranja: Ação Imediata
-  MEDIUM    // Azul: Atenção
-  LOW       // Verde: Informativo
-  EXTERNAL  // Vindo do PLC/OPC (A definir)
+  CRITICAL // Vermelho: Parada/Segurança
+  HIGH // Laranja: Ação Imediata
+  MEDIUM // Azul: Atenção
+  LOW // Verde: Informativo
+  EXTERNAL // Vindo do PLC/OPC (A definir)
 }
 
 enum AlarmStatus {
@@ -69,11 +68,11 @@ model FactoryNode {
   name        String   @db.VarChar(100)
   description String?
   type        NodeType
-  
+
   // Relação Recursiva (Árvore)
   parent   FactoryNode?  @relation("NodeHierarchy", fields: [parentId], references: [id])
   children FactoryNode[] @relation("NodeHierarchy")
-  
+
   // Equipamentos vinculados a este nó (Geralmente em WORKCELL ou LINE)
   equipments Equipment[]
 
@@ -81,17 +80,17 @@ model FactoryNode {
 }
 
 model Equipment {
-  id          Int      @id @default(autoincrement())
-  nodeId      Int      @map("node_id") // Link com a hierarquia ISA-95
-  name        String   @db.VarChar(100)
+  id          Int     @id @default(autoincrement())
+  nodeId      Int     @map("node_id") // Link com a hierarquia ISA-95
+  name        String  @db.VarChar(100)
   description String?
-  imageUrl    String?  @map("image_url")
-  isActive    Boolean  @default(true) @map("is_active")
+  imageUrl    String? @map("image_url")
+  isActive    Boolean @default(true) @map("is_active")
 
   node       FactoryNode @relation(fields: [nodeId], references: [id])
   tags       Tag[]
   alarmRules AlarmRule[]
-  
+
   // Histórico de Alarmes é vinculado ao equipamento para facilitar queries no Dashboard
   alarmHistory AlarmHistory[]
 
@@ -122,13 +121,13 @@ model Tag {
   name        String  @db.VarChar(100)
   unit        String? @db.VarChar(20)
   dataType    String  @default("float") @map("data_type") // float, bool, int, string
-  
+
   // Unified Namespace Path (Gerado Automaticamente: Enterprise/Site/Area/Line/Cell/TagName)
-  unsPath     String  @unique @map("uns_path") @db.VarChar(255)
+  unsPath String @unique @map("uns_path") @db.VarChar(255)
 
   equipment Equipment   @relation(fields: [equipmentId], references: [id])
   mapping   TagMapping? // Relação 1:1 (Uma tag vem de um lugar)
-  
+
   // Dados de Série Temporal (Hypertables)
   telemetry RawTelemetry[]
   analysis  AnalyzedData[]
@@ -177,7 +176,7 @@ model RawTelemetry {
 model AnalyzedData {
   time       DateTime @default(now())
   tagId      Int      @map("tag_id")
-  value      Float    // Valor agregado (ex: Média da hora)
+  value      Float // Valor agregado (ex: Média da hora)
   metricType String   @map("metric_type") @db.VarChar(20) // 'AVG_1H', 'MIN_1H', 'MAX_1H'
 
   tag Tag @relation(fields: [tagId], references: [id])
@@ -189,8 +188,8 @@ model AnalyzedData {
 model AnomalyDetection {
   time  DateTime @default(now())
   tagId Int      @map("tag_id")
-  score Float    // -1.0 a 1.0 (Scikit-Learn Isolation Forest Score)
-  value Float    // O valor lido no momento da anomalia
+  score Float // -1.0 a 1.0 (Scikit-Learn Isolation Forest Score)
+  value Float // O valor lido no momento da anomalia
 
   tag Tag @relation(fields: [tagId], references: [id])
 
@@ -209,10 +208,10 @@ model AlarmRule {
   description String?
   severity    AlarmSeverity
   enabled     Boolean       @default(true)
-  
+
   // A Lógica Complexa (Processada pelo Python)
   // Ex: "{tag:12} > 90 AND {tag:14} == 0"
-  condition   String        @db.VarChar(500) 
+  condition String @db.VarChar(500)
 
   equipment Equipment      @relation(fields: [equipmentId], references: [id])
   history   AlarmHistory[]
@@ -221,21 +220,21 @@ model AlarmRule {
 }
 
 model AlarmHistory {
-  time        DateTime      @default(now())
-  equipmentId Int           @map("equipment_id")
-  ruleId      Int?          @map("rule_id") // Null se vier externo (OPC/PLC direto)
-  
-  message     String        @db.VarChar(255)
-  severity    AlarmSeverity
-  source      String        @db.VarChar(50) // "INTERNAL_RULE", "OPC_UA", "PLC_BIT"
-  
-  status      AlarmStatus
-  ackBy       String?       @map("ack_by") // Nome do usuário
-  ackTime     DateTime?     @map("ack_time")
-  
+  time        DateTime @default(now())
+  equipmentId Int      @map("equipment_id")
+  ruleId      Int?     @map("rule_id") // Null se vier externo (OPC/PLC direto)
+
+  message  String        @db.VarChar(255)
+  severity AlarmSeverity
+  source   String        @db.VarChar(50) // "INTERNAL_RULE", "OPC_UA", "PLC_BIT"
+
+  status  AlarmStatus
+  ackBy   String?     @map("ack_by") // Nome do usuário
+  ackTime DateTime?   @map("ack_time")
+
   // Snapshot dos valores no momento do disparo (JSON String)
   // Ex: "{"temperatura": 95.5, "pressao": 10}"
-  snapshot    String?       @db.Text 
+  snapshot String? @db.Text
 
   equipment Equipment  @relation(fields: [equipmentId], references: [id])
   rule      AlarmRule? @relation(fields: [ruleId], references: [id])
@@ -252,7 +251,7 @@ model User {
   id        Int      @id @default(autoincrement())
   name      String
   email     String   @unique
-  password  String   // Hash
+  password  String // Hash
   role      UserRole @default(VIEWER)
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at")
