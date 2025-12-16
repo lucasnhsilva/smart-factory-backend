@@ -1,13 +1,16 @@
 import { PrismaClient } from '@/generated/prisma/client';
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 @Injectable()
 export class DatabaseService extends PrismaClient implements OnModuleInit {
-  constructor(uri?: string) {
-    const pgAdapter = new PrismaPg(uri ?? process.env.DATABASE_URL);
+  private readonly logger = new Logger(DatabaseService.name);
+  constructor() {
+    const adapter = new PrismaPg({
+      connectionString: process.env.DATABASE_URL,
+    });
     super({
-      adapter: pgAdapter,
+      adapter,
       log:
         process.env.NODE_ENV === 'development'
           ? ['query', 'info', 'error']
@@ -17,8 +20,8 @@ export class DatabaseService extends PrismaClient implements OnModuleInit {
 
   async onModuleInit() {
     await this.$connect().catch((e) =>
-      console.error('Could not connect to database due to error: ', e),
+      this.logger.error('Could not connect to database due to error: ', e),
     );
-    console.log('🌱 Database connected');
+    this.logger.log('🌱 Database connected');
   }
 }
