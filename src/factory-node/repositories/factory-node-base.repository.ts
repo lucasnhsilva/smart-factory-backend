@@ -1,3 +1,3 @@
 export abstract class FactoryNodeBaseRepository {
-  abstract findAll(): Promise<any> | any[];
+  abstract findAll(): Promise<any[]> | any[];
 }
